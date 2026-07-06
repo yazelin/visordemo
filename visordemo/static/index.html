@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>visordemo — SensoPart VISOR 預覽</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #111; color: #ddd; }
+  h1 { font-size: 1.1rem; font-weight: 600; }
+  img { max-width: 100%; border: 1px solid #444; background: #000; min-height: 240px; }
+  .bar { display: flex; gap: 1rem; align-items: center; margin: .8rem 0; flex-wrap: wrap; }
+  #status { color: #888; font-size: .85rem; }
+  #status.err { color: #e66; }
+  button { padding: .3rem .9rem; }
+</style>
+</head>
+<body>
+<h1>visordemo — SensoPart VISOR 預覽</h1>
+<div class="bar">
+  <label><input type="checkbox" id="live"> 連續預覽</label>
+  <label>間隔 <input type="range" id="ms" min="200" max="3000" step="100" value="1000">
+    <span id="msv">1000</span> ms</label>
+  <button id="shot">拍一張</button>
+  <a id="dl" download="visor.png"><button>下載目前影像</button></a>
+  <span id="status"></span>
+</div>
+<img id="view" alt="VISOR image">
+<script>
+const view = document.getElementById('view'), status = document.getElementById('status');
+const live = document.getElementById('live'), ms = document.getElementById('ms');
+let timer = null, url = null;
+
+async function snap() {
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/snapshot.png?t=' + Date.now());
+    if (!r.ok) throw new Error((await r.json()).error || r.status);
+    const blob = await r.blob();
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(blob);
+    view.src = url;
+    document.getElementById('dl').href = url;
+    status.textContent = `${(blob.size/1024).toFixed(0)} KB, ${(performance.now()-t0).toFixed(0)} ms`;
+    status.className = '';
+  } catch (e) {
+    status.textContent = '錯誤: ' + e.message;
+    status.className = 'err';
+  }
+}
+function reschedule() {
+  clearInterval(timer);
+  if (live.checked) timer = setInterval(snap, +ms.value);
+}
+live.onchange = reschedule;
+ms.oninput = () => { document.getElementById('msv').textContent = ms.value; reschedule(); };
+document.getElementById('shot').onclick = snap;
+snap();
+</script>
+</body>
+</html>
