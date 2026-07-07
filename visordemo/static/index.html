@@ -3,103 +3,287 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>visordemo — SensoPart VISOR 預覽</title>
+<title>visordemo — VISOR 操作台</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #111; color: #ddd; }
-  h1 { font-size: 1.1rem; font-weight: 600; }
-  img { max-width: 100%; border: 1px solid #444; background: #000; min-height: 240px; }
-  .bar { display: flex; gap: 1rem; align-items: center; margin: .8rem 0; flex-wrap: wrap; }
-  #status { color: #888; font-size: .85rem; }
-  #status.err { color: #e66; }
-  button { padding: .3rem .9rem; }
+  :root {
+    --bg: #101214; --panel: #191d21; --panel2: #14171a;
+    --line: #2b3138; --text: #cdd3d9; --dim: #7b838d;
+    --accent: #f07f1a; --ok: #4cc38a; --err: #e5534b;
+    --mono: ui-monospace, "SF Mono", Consolas, "Cascadia Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, "Noto Sans TC", sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 14px;
+    padding: 14px 20px 12px; border-bottom: 1px solid var(--line);
+  }
+  header h1 {
+    font: 600 15px/1 var(--mono); letter-spacing: .22em; margin: 0;
+  }
+  header h1 em { color: var(--accent); font-style: normal; }
+  #devline { font: 12px var(--mono); color: var(--dim); }
+  #led {
+    width: 8px; height: 8px; border-radius: 50%; align-self: center;
+    background: var(--dim); margin-left: auto; flex: none;
+  }
+  #led.ok  { background: var(--ok);  box-shadow: 0 0 6px var(--ok); }
+  #led.err { background: var(--err); box-shadow: 0 0 6px var(--err); }
+  #ledtext { font: 12px var(--mono); color: var(--dim); align-self: center; }
+
+  main {
+    display: grid; grid-template-columns: 1fr 300px;
+    gap: 16px; padding: 16px 20px; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  /* ── 取景框:signature ─────────────────────────── */
+  .viewport {
+    position: relative; background: #000;
+    border: 1px solid var(--line); padding: 14px; min-height: 300px;
+  }
+  .viewport img { display: block; width: 100%; }
+  .fid { position: absolute; width: 16px; height: 16px; pointer-events: none; }
+  .fid.tl { top: 6px; left: 6px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .fid.tr { top: 6px; right: 6px; border-top: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .fid.bl { bottom: 6px; left: 6px; border-bottom: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .fid.br { bottom: 6px; right: 6px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .scan {
+    position: absolute; top: 0; left: 0; height: 2px; width: 26%;
+    background: var(--accent); opacity: 0; pointer-events: none;
+  }
+  .busy .scan { opacity: .9; animation: sweep 1.1s linear infinite; }
+  @keyframes sweep { from { left: -26%; } to { left: 100%; } }
+  @media (prefers-reduced-motion: reduce) {
+    .busy .scan { animation: none; left: 0; width: 100%; opacity: .5; }
+  }
+
+  #strip {
+    display: flex; flex-wrap: wrap; gap: 4px 22px;
+    padding: 8px 2px 0; font: 12px var(--mono); color: var(--dim);
+  }
+  #strip b { color: var(--text); font-weight: 500; }
+  #strip .u { color: var(--dim); }
+
+  /* ── 控制面板模組 ─────────────────────────────── */
+  aside { display: flex; flex-direction: column; gap: 12px; }
+  section {
+    background: var(--panel); border: 1px solid var(--line); padding: 12px 14px 14px;
+  }
+  section h2 {
+    margin: 0 0 10px; font-size: 13px; font-weight: 600; letter-spacing: .04em;
+  }
+  section h2 small {
+    font: 10px var(--mono); letter-spacing: .24em; color: var(--dim);
+    margin-left: 8px; vertical-align: 1px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .row:first-of-type { margin-top: 0; }
+  label.f { font-size: 12.5px; color: var(--dim); display: flex; gap: 6px; align-items: center; }
+
+  input[type=number], select {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 3px;
+    font: 13px var(--mono); padding: 5px 7px;
+  }
+  input[type=number] { width: 7.5em; }
+  select { max-width: 100%; }
+  input[type=range] { accent-color: var(--accent); width: 110px; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  button {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 3px;
+    font: 13px system-ui, "Noto Sans TC", sans-serif;
+    padding: 5px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.primary {
+    background: var(--accent); border-color: var(--accent);
+    color: #14171a; font-weight: 600;
+  }
+  button.primary:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .45; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .note { font-size: 11.5px; color: var(--dim); margin-top: 8px; }
+  #msg { font: 12px var(--mono); min-height: 1.2em; margin-top: 4px; }
+  #msg.err { color: var(--err); }
+  #msg.ok { color: var(--dim); }
+  .perm { border-top: 1px dashed var(--line); padding-top: 10px; margin-top: 12px; }
+  .perm label.f { color: var(--accent); }
 </style>
 </head>
 <body>
-<h1>visordemo — SensoPart VISOR 預覽</h1>
-<div class="bar">
-  <label><input type="checkbox" id="live"> 連續預覽</label>
-  <label>間隔 <input type="range" id="ms" min="200" max="3000" step="100" value="1000">
-    <span id="msv">1000</span> ms</label>
-  <button id="shot">拍一張</button>
-  <a id="dl" download="visor.png"><button>下載目前影像</button></a>
-  <span id="status"></span>
-</div>
-<div class="bar">
-  <label>對焦距離 <input type="number" id="fmm" min="10" max="3000" step="10" style="width:6em"> mm</label>
-  <button id="fset">設定</button>
-  <button id="fauto">自動對焦</button>
-  <span id="fov"></span>
-  <span id="fstatus"></span>
-</div>
-<div class="bar">
-  <label>快門 <input type="number" id="sms" min="0.01" max="500" step="0.5" style="width:5em"> ms</label>
-  <button id="sset">設定</button>
-  <button id="sauto">自動曝光</button>
-  <label>增益 <input type="number" id="gv" min="1" max="16" step="0.1" style="width:4em"></label>
-  <button id="gset">設定</button>
-  <label>Job <select id="jsel"></select></label>
-  <button id="jset">切換</button>
-  <span id="cstatus"></span>
-</div>
-<img id="view" alt="VISOR image">
+<header>
+  <h1>VISOR<em>DEMO</em></h1>
+  <span id="devline">—</span>
+  <span id="led"></span><span id="ledtext">連線中</span>
+</header>
+
+<main>
+  <div>
+    <div class="viewport" id="vp">
+      <span class="fid tl"></span><span class="fid tr"></span>
+      <span class="fid bl"></span><span class="fid br"></span>
+      <div class="scan"></div>
+      <img id="view" alt="感測器影像">
+    </div>
+    <div id="strip">
+      <span>解析度 <b id="d_res">—</b></span>
+      <span>視野 <b id="d_fov">—</b></span>
+      <span>快門 <b id="d_ms">—</b><span class="u"> ms</span></span>
+      <span>增益 <b id="d_gain">—</b><span class="u"> x</span></span>
+      <span>對焦 <b id="d_mm">—</b><span class="u"> mm</span></span>
+      <span>取像 <b id="d_t">—</b></span>
+      <span>大小 <b id="d_kb">—</b></span>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <aside>
+    <section>
+      <h2>取像<small>ACQUISITION</small></h2>
+      <div class="row">
+        <button id="shot" class="primary">拍一張</button>
+        <select id="which" title="取哪一張影像">
+          <option value="0">最後影像</option>
+          <option value="2">最後 OK</option>
+          <option value="1">最後 NG</option>
+        </select>
+        <a id="dl" download="visor.png"><button>下載</button></a>
+      </div>
+      <div class="row">
+        <label class="f"><input type="checkbox" id="live"> 連續預覽</label>
+        <input type="range" id="ms" min="500" max="5000" step="250" value="2500">
+        <span id="msv" style="font:12px var(--mono);color:var(--dim)">2500 ms</span>
+      </div>
+      <div class="row">
+        <label class="f"><input type="checkbox" id="notrig"> 只取像不觸發</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>對焦<small>FOCUS</small></h2>
+      <div class="row">
+        <input type="number" id="fmm" min="10" max="10000" step="10"> <span class="u" style="font-size:12px;color:var(--dim)">mm</span>
+        <button id="fset">設定</button>
+        <button id="fauto">自動對焦</button>
+      </div>
+      <div class="note" id="fov_note">工作距離愈遠視野愈大</div>
+    </section>
+
+    <section>
+      <h2>曝光<small>EXPOSURE</small></h2>
+      <div class="row">
+        <label class="f">快門 <input type="number" id="sms" min="0.01" max="6100" step="0.5"> ms</label>
+        <button id="sset">設定</button>
+      </div>
+      <div class="row">
+        <label class="f">增益 <input type="number" id="gv" min="1" max="16" step="0.1"></label>
+        <button id="gset">設定</button>
+        <button id="sauto">自動曝光</button>
+      </div>
+      <div class="note">舊韌體手動快門部分數值會被拒,調亮度以自動曝光為主</div>
+    </section>
+
+    <section>
+      <h2>檢測程式<small>JOB</small></h2>
+      <div class="row">
+        <select id="jsel" style="flex:1"></select>
+        <button id="jset">切換</button>
+      </div>
+      <div class="perm">
+        <label class="f"><input type="checkbox" id="perm"> 寫入 job(斷電保留)</label>
+        <div class="note">勾選後,對焦/曝光/增益/Job 的變更會永久存入感測器</div>
+      </div>
+    </section>
+  </aside>
+</main>
+
 <script>
-const view = document.getElementById('view'), status = document.getElementById('status');
-const live = document.getElementById('live'), ms = document.getElementById('ms');
-let timer = null, url = null;
+const $ = id => document.getElementById(id);
+const msg = $('msg'), led = $('led'), ledtext = $('ledtext');
+let timer = null, url = null, inflight = false;
+
+$('devline').textContent = location.host + ' -> VISOR';
+
+function status(ok, text) {
+  led.className = ok ? 'ok' : 'err';
+  ledtext.textContent = ok ? '連線正常' : '連線異常';
+  msg.className = ok ? 'ok' : 'err';
+  msg.textContent = text || '';
+}
+function applyInfo(j) {
+  if (j.mm !== undefined) { $('fmm').value = j.mm; $('d_mm').textContent = j.mm; }
+  if (j.fov_mm) {
+    const t = (j.fov_mm[0]/10).toFixed(1) + ' x ' + (j.fov_mm[1]/10).toFixed(1) + ' cm';
+    $('d_fov').textContent = t;
+    $('fov_note').textContent = '目前工作距離的視野:' + t;
+  }
+  if (j.ms !== undefined) { $('sms').value = j.ms; $('d_ms').textContent = j.ms; }
+  if (j.gain !== undefined) { $('gv').value = j.gain; $('d_gain').textContent = j.gain; }
+  if (j.jobs) {
+    $('jsel').innerHTML = j.jobs.map((n, i) =>
+      `<option value="${i+1}" ${i+1 === j.active ? 'selected' : ''}>${i+1} · ${n}</option>`).join('');
+  }
+}
+const permQ = () => $('perm').checked ? '&perm=1' : '';
 
 async function snap() {
+  if (inflight) return;
+  inflight = true;
+  $('vp').classList.add('busy');
   const t0 = performance.now();
   try {
-    const r = await fetch('/snapshot.png?t=' + Date.now());
-    if (!r.ok) throw new Error((await r.json()).error || r.status);
+    const qs = '?which=' + $('which').value + ($('notrig').checked ? '&trigger=0' : '') + '&t=' + Date.now();
+    const r = await fetch('/snapshot.png' + qs);
+    if (!r.ok) throw new Error((await r.json()).error || 'HTTP ' + r.status);
     const blob = await r.blob();
     if (url) URL.revokeObjectURL(url);
     url = URL.createObjectURL(blob);
-    view.src = url;
-    document.getElementById('dl').href = url;
-    status.textContent = `${(blob.size/1024).toFixed(0)} KB, ${(performance.now()-t0).toFixed(0)} ms`;
-    status.className = '';
-  } catch (e) {
-    status.textContent = '錯誤: ' + e.message;
-    status.className = 'err';
-  }
+    $('view').src = url; $('dl').href = url;
+    const img = new Image();
+    img.onload = () => { $('d_res').textContent = img.naturalWidth + 'x' + img.naturalHeight; };
+    img.src = url;
+    $('d_t').textContent = ((performance.now() - t0)/1000).toFixed(1) + ' s';
+    $('d_kb').textContent = (blob.size/1024).toFixed(0) + ' KB';
+    status(true);
+  } catch (e) { status(false, '取像失敗:' + e.message); }
+  $('vp').classList.remove('busy');
+  inflight = false;
 }
-function reschedule() {
-  clearInterval(timer);
-  if (live.checked) timer = setInterval(snap, +ms.value);
-}
-live.onchange = reschedule;
-ms.oninput = () => { document.getElementById('msv').textContent = ms.value; reschedule(); };
-document.getElementById('shot').onclick = snap;
-
-const $ = id => document.getElementById(id);
-function applyInfo(j) {
-  if (j.mm !== undefined) $('fmm').value = j.mm;
-  if (j.fov_mm) $('fov').textContent = `FOV ${(j.fov_mm[0]/10).toFixed(1)} x ${(j.fov_mm[1]/10).toFixed(1)} cm`;
-  if (j.ms !== undefined) $('sms').value = j.ms;
-  if (j.gain !== undefined) $('gv').value = j.gain;
-  if (j.jobs) {
-    $('jsel').innerHTML = j.jobs.map((n, i) =>
-      `<option value="${i+1}" ${i+1 === j.active ? 'selected' : ''}>${i+1}: ${n}</option>`).join('');
-  }
-}
-async function api(path, el, busy, resnap) {
-  el.textContent = busy || '';
+async function api(path, busy, resnap) {
+  status(true, busy);
+  $('vp').classList.add('busy');
   try {
     const j = await (await fetch(path)).json();
     if (!j.ok) throw new Error(j.error);
     applyInfo(j);
-    el.textContent = '完成';
-    if (resnap) { await refreshInfo(); snap(); }
-  } catch (e) { el.textContent = '錯誤: ' + e.message; el.className = 'err'; }
+    status(true, '完成');
+    if (resnap) { refreshInfo(); snap(); }
+  } catch (e) { status(false, e.message); }
+  $('vp').classList.remove('busy');
 }
-const refreshInfo = () => api('/api/info', $('cstatus'), '讀取中...');
-$('fset').onclick = () => api('/api/focus?set=' + $('fmm').value, $('fstatus'), '對焦中...', true);
-$('fauto').onclick = () => api('/api/focus?auto=1', $('fstatus'), '自動對焦中(可能十幾秒)...', true);
-$('sset').onclick = () => api('/api/shutter?set=' + $('sms').value, $('cstatus'), '設定中...', true);
-$('sauto').onclick = () => api('/api/shutter?auto=1', $('cstatus'), '自動曝光中...', true);
-$('gset').onclick = () => api('/api/gain?set=' + $('gv').value, $('cstatus'), '設定中...', true);
-$('jset').onclick = () => api('/api/job?set=' + $('jsel').value, $('cstatus'), '切換中...', true);
+const refreshInfo = () => api('/api/info', '讀取設定中...');
+
+$('shot').onclick = snap;
+$('fset').onclick = () => api('/api/focus?set=' + $('fmm').value + permQ(), '對焦移動中...', true);
+$('fauto').onclick = () => api('/api/focus?auto=1' + permQ(), '自動對焦中(可能十幾秒)...', true);
+$('sset').onclick = () => api('/api/shutter?set=' + $('sms').value + permQ(), '設定快門...', true);
+$('sauto').onclick = () => api('/api/shutter?auto=1' + permQ(), '自動曝光中...', true);
+$('gset').onclick = () => api('/api/gain?set=' + $('gv').value + permQ(), '設定增益...', true);
+$('jset').onclick = () => api('/api/job?set=' + $('jsel').value + permQ(), '切換 job...', true);
+
+function reschedule() {
+  clearInterval(timer);
+  if ($('live').checked) timer = setInterval(snap, +$('ms').value);
+}
+$('live').onchange = reschedule;
+$('ms').oninput = () => { $('msv').textContent = $('ms').value + ' ms'; reschedule(); };
+
 refreshInfo();
 snap();
 </script>

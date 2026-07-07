@@ -34,11 +34,15 @@ class Handler(BaseHTTPRequestHandler):
             self._api()
         elif self.path.startswith("/snapshot.png"):
             # ponytail: 每張開新連線,開-拍-關,斷線自癒;要更快再改常駐連線
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            which = int(q.get("which", ["0"])[0])
+            trigger = q.get("trigger", ["1"])[0] != "0"
             try:
                 with Camera(self.visor_host, self.visor_port,
-                            auto_trigger=self.auto_trigger) as cam:
-                    self._reply(200, "image/png", cam.read_png())
-            except (OSError, VisorError) as e:
+                            auto_trigger=self.auto_trigger and trigger) as cam:
+                    self._reply(200, "image/png", cam.capture(which).to_png())
+            except (OSError, ValueError, VisorError) as e:
                 body = json.dumps({"ok": False, "error": str(e)}).encode()
                 self._reply(502, "application/json", body)
         else:
@@ -48,30 +52,31 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs, urlparse
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        perm = q.get("perm", ["0"])[0] == "1"
         try:
             with Camera(self.visor_host, self.visor_port,
                         auto_trigger=False) as cam:
                 if u.path == "/api/focus":
                     if "auto" in q:
-                        out = {"mm": cam.autofocus()}
+                        out = {"mm": cam.autofocus(perm)}
                     elif "set" in q:
-                        out = {"mm": cam.set_focus(float(q["set"][0]))}
+                        out = {"mm": cam.set_focus(float(q["set"][0]), perm)}
                     else:
                         out = {"mm": cam.get_focus()}
                 elif u.path == "/api/shutter":
                     if "auto" in q:
-                        cam.auto_shutter()
+                        cam.auto_shutter(perm)
                     elif "set" in q:
-                        cam.set_shutter(float(q["set"][0]))
+                        cam.set_shutter(float(q["set"][0]), perm)
                     out = {"ms": cam.get_shutter()}
                 elif u.path == "/api/gain":
                     if "set" in q:
-                        cam.set_gain(float(q["set"][0]))
+                        cam.set_gain(float(q["set"][0]), perm)
                     out = {"gain": cam.get_gain()}
                 elif u.path == "/api/job":
                     if "set" in q:
                         raw = q["set"][0]
-                        cam.set_job(int(raw) if raw.isdigit() else raw)
+                        cam.set_job(int(raw) if raw.isdigit() else raw, perm)
                     active, names = cam.jobs()
                     out = {"active": active, "jobs": names}
                 elif u.path == "/api/info":
