@@ -5,6 +5,7 @@ context manager、set_control、start_stream/stop_stream 皆有(後三者為
 no-op / 明確拒絕),read_png() 取代 read_jpeg()。
 """
 import socket
+import time
 
 from .protocol import (Frame, VisorError, afc_request, gfc_request,
                        gim_request, parse_focus_response, parse_gim_header,
@@ -71,20 +72,27 @@ class Camera:
         data = self._recv_exact(rows * cols)
         return Frame(rows, cols, image_type, good, data)
 
-    def _ask(self, payload: bytes, quiet: float = 0.4) -> bytes:
-        """Send + drain reply until brief silence(變長回應用,控制指令皆短)."""
+    def _ask(self, payload: bytes, quiet: float = 0.3,
+             first: float | None = None) -> bytes:
+        """Send + drain reply until brief silence(變長回應用,控制指令皆短).
+
+        first: 等第一個位元組的秒數(預設用連線 timeout)——感測器長曝光
+        取像中會延遲回應,不能只等 quiet 那麼短。
+        """
         self._send(payload)
         old = self._sock.gettimeout()
         buf = b""
         try:
-            self._sock.settimeout(quiet)
+            self._sock.settimeout(first if first is not None else old)
             while True:
-                chunk = self._sock.recv(4096)
+                try:
+                    chunk = self._sock.recv(4096)
+                except socket.timeout:
+                    break
                 if not chunk:
                     break
                 buf += chunk
-        except socket.timeout:
-            pass
+                self._sock.settimeout(quiet)  # 有資料後,短靜默即收工
         finally:
             self._sock.settimeout(old)
         if not buf:
@@ -137,6 +145,7 @@ class Camera:
         逐一嘗試並以 GSH 讀回驗證,測到能用的格式就記住。
         """
         target = round(ms * 1000)
+        before = round(self.get_shutter() * 1000)
         cmd = b"SSP" if permanent else b"SST"
         new_fmt = f"{len(str(target)):02d}{target}".encode()
         old_fmt = b"%06d" % target
@@ -150,12 +159,22 @@ class Camera:
             if abs(got - target) <= max(100, target * 0.05):
                 self._shutter_fmt = "new" if payload is new_fmt else "old"
                 return got / 1000
-        raise VisorError(f"set shutter {target}us failed on both telegram formats"
-                         f" (sensor now at {self.get_shutter()}ms)")
+        # 兩種格式都設不準:盡力還原呼叫前的值,別留下錯誤快門
+        for payload in (b"%06d" % before,
+                        f"{len(str(before)):02d}{before}".encode()):
+            try:
+                self._check(self._ask(cmd + payload), cmd)
+            except VisorError:
+                continue
+            if abs(round(self.get_shutter() * 1000) - before) <= max(100, before * 0.05):
+                break
+        raise VisorError(
+            f"set shutter {target}us failed on both telegram formats"
+            f" (sensor now at {self.get_shutter()}ms)")
 
     def auto_shutter(self, permanent: bool = False) -> None:
         """ASH: auto-determine shutter speed."""
-        self._check(self._ask(b"ASH1" + (b"1" if permanent else b"0"), quiet=10.0),
+        self._check(self._ask(b"ASH1" + (b"1" if permanent else b"0"), first=30.0),
                     b"ASH")
 
     def get_gain(self) -> float:
@@ -200,10 +219,25 @@ class Camera:
         self._send(gfc_request())
         return self._read_focus(b"GFC")
 
-    def set_focus(self, mm: float, permanent: bool = False) -> float:
-        """SFC: set absolute working distance in mm. Returns actual value."""
+    def set_focus(self, mm: float, permanent: bool = False,
+                  settle_timeout: float = 20.0) -> float:
+        """SFC: set absolute working distance in mm. Returns actual value.
+
+        SFC 回應可能早於馬達到位(大行程移動),故以 GFC 輪詢直到
+        到位或位置不再變化。
+        """
         self._send(sfc_request(mm, permanent))
-        return self._read_focus(b"SFC")
+        got = self._read_focus(b"SFC")
+        deadline = time.monotonic() + settle_timeout
+        prev = None
+        while abs(got - mm) > 1.0 and time.monotonic() < deadline:
+            if prev is not None and got == prev:
+                self._send(sfc_request(mm, permanent))  # 沒在動了還沒到位,補發
+                self._read_focus(b"SFC")
+            prev = got
+            time.sleep(0.4)
+            got = self.get_focus()
+        return got
 
     def autofocus(self, permanent: bool = False) -> float:
         """AFC: run autofocus, returns found working distance in mm. Slow."""
