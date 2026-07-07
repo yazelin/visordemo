@@ -233,7 +233,7 @@ function applyInfo(j) {
 const permQ = () => $('perm').checked ? '&perm=1' : '';
 
 async function snap() {
-  if (inflight) return;
+  if (inflight || ctrlBusy) return;  // 控制指令進行中不搶相機
   inflight = true;
   $('vp').classList.add('busy');
   const t0 = performance.now();
@@ -255,7 +255,17 @@ async function snap() {
   $('vp').classList.remove('busy');
   inflight = false;
 }
+// 控制指令一次只能有一個在飛:VISOR 命令 port 一次只服務一個請求,
+// 疊指令會排到相機忙碌後面、甚至觸發長掃時全部逾時。busy 期間鎖住所有按鈕。
+let ctrlBusy = false;
+const CTRL_BTNS = ['shot', 'fset', 'fauto', 'sset', 'sauto', 'gset', 'jset'];
+function lockCtrls(on) {
+  ctrlBusy = on;
+  CTRL_BTNS.forEach(id => { $(id).disabled = on; });
+}
 async function api(path, busy, resnap) {
+  if (ctrlBusy) return;
+  lockCtrls(true);
   status(true, busy);
   $('vp').classList.add('busy');
   try {
@@ -263,17 +273,25 @@ async function api(path, busy, resnap) {
     if (!j.ok) throw new Error(j.error);
     applyInfo(j);
     status(true, '完成');
-    if (resnap) { refreshInfo(); snap(); }
+    if (resnap) { await refreshInfo0(); snap(); }
   } catch (e) { status(false, e.message); }
   $('vp').classList.remove('busy');
+  lockCtrls(false);
+}
+// refreshInfo 不經 busy 鎖的版本(給 api 內部收尾用,避免自我死鎖)
+async function refreshInfo0() {
+  try {
+    const j = await (await fetch('/api/info')).json();
+    if (j.ok) applyInfo(j);
+  } catch (e) {}
 }
 const refreshInfo = () => api('/api/info', '讀取設定中...');
 
 $('shot').onclick = snap;
 $('fset').onclick = () => api('/api/focus?set=' + $('fmm').value + permQ(), '對焦移動中...', true);
-$('fauto').onclick = () => api('/api/focus?auto=1' + permQ(), '自動對焦中(可能十幾秒)...', true);
+$('fauto').onclick = () => { if (confirm('自動對焦會讓相機掃描整個對焦行程(低對比場景可能掃近一分鐘、期間閃光不停且無法中斷)。建議直接手動輸入距離。仍要自動對焦?')) api('/api/focus?auto=1' + permQ(), '自動對焦掃描中,請等它跑完不要重複按...', true); };
 $('sset').onclick = () => api('/api/shutter?set=' + $('sms').value + permQ(), '設定快門...', true);
-$('sauto').onclick = () => api('/api/shutter?auto=1' + permQ(), '自動曝光中...', true);
+$('sauto').onclick = () => api('/api/shutter?auto=1' + permQ(), '自動曝光量測中(數秒)...', true);
 $('gset').onclick = () => api('/api/gain?set=' + $('gv').value + permQ(), '設定增益...', true);
 $('jset').onclick = () => api('/api/job?set=' + $('jsel').value + permQ(), '切換 job...', true);
 

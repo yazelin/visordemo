@@ -1,11 +1,16 @@
 """Web UI: 即時預覽 SensoPart VISOR 影像(輪詢 /snapshot.png)。"""
 import json
+import threading
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from .camera import Camera
 from .protocol import VisorError
+
+# VISOR 命令 port 一次只服務一個連線;並發請求(多分頁/重試/預覽輪詢)
+# 疊上去會排到相機忙碌後面,長掃時全部逾時。全程序單飛,忙碌就快速回絕。
+_CAM_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,6 +43,11 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(urlparse(self.path).query)
             which = int(q.get("which", ["0"])[0])
             trigger = q.get("trigger", ["1"])[0] != "0"
+            if not _CAM_LOCK.acquire(blocking=False):
+                # 相機正忙(通常是有人在調參數/自動對焦),丟掉這張預覽即可
+                self._reply(409, "application/json",
+                            json.dumps({"ok": False, "error": "相機忙碌中"}).encode())
+                return
             try:
                 with Camera(self.visor_host, self.visor_port,
                             auto_trigger=self.auto_trigger and trigger) as cam:
@@ -45,6 +55,8 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, VisorError) as e:
                 body = json.dumps({"ok": False, "error": str(e)}).encode()
                 self._reply(502, "application/json", body)
+            finally:
+                _CAM_LOCK.release()
         else:
             self._reply(404, "text/plain", b"not found")
 
@@ -53,6 +65,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         perm = q.get("perm", ["0"])[0] == "1"
+        if not _CAM_LOCK.acquire(blocking=False):
+            self._reply(409, "application/json", json.dumps(
+                {"ok": False, "error": "相機忙碌中,請等前一個操作完成"}).encode())
+            return
         try:
             with Camera(self.visor_host, self.visor_port,
                         auto_trigger=False) as cam:
@@ -94,6 +110,8 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError, VisorError) as e:
             self._reply(502, "application/json",
                         json.dumps({"ok": False, "error": str(e)}).encode())
+        finally:
+            _CAM_LOCK.release()
 
 
 def serve(visor_host, visor_port=2006, listen="127.0.0.1", listen_port=8601,

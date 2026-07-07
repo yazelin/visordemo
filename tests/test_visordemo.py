@@ -154,5 +154,47 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG"))
 
 
+class TestServerSingleFlight(unittest.TestCase):
+    """相機命令 port 單飛:忙碌時並發請求回 409 而非疊上去打爆相機。"""
+
+    def setUp(self):
+        import threading
+        from http.server import ThreadingHTTPServer
+        from functools import partial
+        from visordemo import server as server_mod
+        from visordemo.server import Handler
+
+        self.sim = Simulator(host="127.0.0.1", port=0, rows=32, cols=32).start()
+        self.addCleanup(self.sim.stop)
+        self.server_mod = server_mod
+        handler = partial(Handler, host="127.0.0.1", port=self.sim.port,
+                          auto_trigger=True)
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.port = self.httpd.server_address[1]
+        t = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        t.start()
+        self.addCleanup(self.httpd.shutdown)
+
+    def _get(self, path):
+        import urllib.request
+        import urllib.error
+        try:
+            r = urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}")
+            return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_busy_camera_returns_409(self):
+        # 佔住相機鎖,模擬「有人正在調參數/自動對焦」
+        self.server_mod._CAM_LOCK.acquire()
+        try:
+            self.assertEqual(self._get("/api/info"), 409)
+            self.assertEqual(self._get("/snapshot.png"), 409)
+        finally:
+            self.server_mod._CAM_LOCK.release()
+        # 放開後恢復正常
+        self.assertEqual(self._get("/api/info"), 200)
+
+
 if __name__ == "__main__":
     unittest.main()
