@@ -68,11 +68,10 @@ photo.capture("192.168.2.100", dst, camera_factory=VisorCamera)
 - **ASCII 協定**:感測器的 telegram 格式須設為 ASCII(SensoConfig 出廠預設)。BINARY 格式未實作。
 - **End-of-telegram**:若 SensoConfig 裡設定了結尾字元,建 `Camera(..., eot=b"\r\n")` 帶上,否則影像資料起點會錯位。預設無。
 - **Bayer 彩色**:影像型別 3(Bayer BG)目前直接以灰階輸出 raw mosaic,未做 demosaic。單色機種(常見)不受影響。
-- **機種支援度**:`GIM` 的可用性依 VISOR 機種/韌體而異,請對照該機型通訊手冊的 Availability 表;實機第一次先跑 `visordemo snapshot` 驗證。
-- **未在實機驗證**:協定依官方手冊(068-14859-05 EN)撰寫並以內建 simulator 測試,尚未接過實體 VISOR。實機驗證清單:
-  1. `visordemo trigger --host <ip>` — 應回 Pass。
-  2. `visordemo snapshot --host <ip>` — 應存出解析度正確的 PNG。
-  3. `visordemo serve --host <ip>` — 連續預覽畫面應隨現場變化。
+- **機種支援度**:`GIM` 的可用性依 VISOR 機種/韌體而異,請對照該機型通訊手冊的 Availability 表;新機第一次先跑 `visordemo snapshot` 驗證。
+- **`good=False` 不是錯誤**:那是感測器 job 的檢測判定(Pass/Fail),與取像成敗無關。
+
+已於實機驗證(2026-07):VISOR @ 192.168.2.111,`trigger` 回 Pass、`snapshot` 取得 1440x1080 灰階 PNG,無 end-of-telegram、無錯位。
 
 ## 測試
 
