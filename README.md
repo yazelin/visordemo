@@ -94,6 +94,7 @@ HTTP API(全部回 JSON,錯誤回 `{"ok":false,"error":...}`):
 - **End-of-telegram**:若 SensoConfig 裡設定了結尾字元,建 `Camera(..., eot=b"\r\n")` 帶上,否則影像資料起點會錯位。預設無。
 - **Bayer 彩色**:影像型別 3 做半解析度 demosaic(2x2 quad → 1 RGB 像素);黑白/彩色由感光元件硬體決定,黑白機種(GIM 回型別 0)不可能輸出彩色。
 - **舊韌體 SST 數值語義不明**:實測一台舊韌體(GSI 不支援),`SST` 設快門時同一格式有的值正確、有的值差一個數量級(疑似解析規則不同於 2.10 手冊)。`set_shutter()` 靠讀回驗證擋掉錯誤結果,但某些目標值會直接回報失敗——舊韌體調曝光請改用 `auto_shutter()`(實測可用)或 SensoConfig。
+- **自動對焦/自動曝光在舊韌體會長時間掃描**:AFC(`autofocus()`)在低對比場景下會掃描整個對焦行程(50~1830mm),實測可長達近一分鐘、期間閃光不停且**命令 port 被佔死**,此時其他指令會逾時或連線 reset,看起來像卡死(其實掃完就會恢復;停掉所有客戶端別再送指令即可)。web UI 已加單飛鎖(忙碌回 409)與自動對焦確認對話框。**建議優先用手動對焦**(`set_focus(mm)`,精準即時);量產請直接把焦距/曝光存進 job(SensoConfig 或 `permanent=True`),不要在流程中呼叫 AFC/ASH。
 - **機種支援度**:各 telegram 的可用性依 VISOR 機種/韌體而異(手冊 Availability 表);新機第一次先跑 `visordemo info` 和 `snapshot` 驗證。
 - **`good=False` 不是錯誤**:那是感測器 job 的檢測判定(Pass/Fail),與取像成敗無關。
 - 未實作(用不到就沒做):TRX/TRR/STI 進階觸發、檢測器參數 SPP/GPA、ROI SRP、校正設定 CSP、統計 RST、BINARY 協定。
