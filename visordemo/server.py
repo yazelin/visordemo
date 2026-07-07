@@ -30,6 +30,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/":
             html = (resources.files("visordemo") / "static/index.html").read_bytes()
             self._reply(200, "text/html; charset=utf-8", html)
+        elif self.path.startswith("/api/"):
+            self._api()
         elif self.path.startswith("/snapshot.png"):
             # ponytail: 每張開新連線,開-拍-關,斷線自癒;要更快再改常駐連線
             try:
@@ -41,6 +43,52 @@ class Handler(BaseHTTPRequestHandler):
                 self._reply(502, "application/json", body)
         else:
             self._reply(404, "text/plain", b"not found")
+
+    def _api(self):
+        from urllib.parse import parse_qs, urlparse
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        try:
+            with Camera(self.visor_host, self.visor_port,
+                        auto_trigger=False) as cam:
+                if u.path == "/api/focus":
+                    if "auto" in q:
+                        out = {"mm": cam.autofocus()}
+                    elif "set" in q:
+                        out = {"mm": cam.set_focus(float(q["set"][0]))}
+                    else:
+                        out = {"mm": cam.get_focus()}
+                elif u.path == "/api/shutter":
+                    if "auto" in q:
+                        cam.auto_shutter()
+                    elif "set" in q:
+                        cam.set_shutter(float(q["set"][0]))
+                    out = {"ms": cam.get_shutter()}
+                elif u.path == "/api/gain":
+                    if "set" in q:
+                        cam.set_gain(float(q["set"][0]))
+                    out = {"gain": cam.get_gain()}
+                elif u.path == "/api/job":
+                    if "set" in q:
+                        raw = q["set"][0]
+                        cam.set_job(int(raw) if raw.isdigit() else raw)
+                    active, names = cam.jobs()
+                    out = {"active": active, "jobs": names}
+                elif u.path == "/api/info":
+                    mm = cam.get_focus()
+                    w, h = cam.fov(mm)
+                    active, names = cam.jobs()
+                    out = {"mm": mm, "fov_mm": [w, h],
+                           "ms": cam.get_shutter(), "gain": cam.get_gain(),
+                           "active": active, "jobs": names}
+                else:
+                    self._reply(404, "text/plain", b"unknown api")
+                    return
+            out["ok"] = True
+            self._reply(200, "application/json", json.dumps(out).encode())
+        except (OSError, ValueError, VisorError) as e:
+            self._reply(502, "application/json",
+                        json.dumps({"ok": False, "error": str(e)}).encode())
 
 
 def serve(visor_host, visor_port=2006, listen="127.0.0.1", listen_port=8601,

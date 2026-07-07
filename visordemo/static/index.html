@@ -24,6 +24,23 @@
   <a id="dl" download="visor.png"><button>下載目前影像</button></a>
   <span id="status"></span>
 </div>
+<div class="bar">
+  <label>對焦距離 <input type="number" id="fmm" min="10" max="3000" step="10" style="width:6em"> mm</label>
+  <button id="fset">設定</button>
+  <button id="fauto">自動對焦</button>
+  <span id="fov"></span>
+  <span id="fstatus"></span>
+</div>
+<div class="bar">
+  <label>快門 <input type="number" id="sms" min="0.01" max="500" step="0.5" style="width:5em"> ms</label>
+  <button id="sset">設定</button>
+  <button id="sauto">自動曝光</button>
+  <label>增益 <input type="number" id="gv" min="1" max="16" step="0.1" style="width:4em"></label>
+  <button id="gset">設定</button>
+  <label>Job <select id="jsel"></select></label>
+  <button id="jset">切換</button>
+  <span id="cstatus"></span>
+</div>
 <img id="view" alt="VISOR image">
 <script>
 const view = document.getElementById('view'), status = document.getElementById('status');
@@ -54,6 +71,36 @@ function reschedule() {
 live.onchange = reschedule;
 ms.oninput = () => { document.getElementById('msv').textContent = ms.value; reschedule(); };
 document.getElementById('shot').onclick = snap;
+
+const $ = id => document.getElementById(id);
+function applyInfo(j) {
+  if (j.mm !== undefined) $('fmm').value = j.mm;
+  if (j.fov_mm) $('fov').textContent = `FOV ${(j.fov_mm[0]/10).toFixed(1)} x ${(j.fov_mm[1]/10).toFixed(1)} cm`;
+  if (j.ms !== undefined) $('sms').value = j.ms;
+  if (j.gain !== undefined) $('gv').value = j.gain;
+  if (j.jobs) {
+    $('jsel').innerHTML = j.jobs.map((n, i) =>
+      `<option value="${i+1}" ${i+1 === j.active ? 'selected' : ''}>${i+1}: ${n}</option>`).join('');
+  }
+}
+async function api(path, el, busy, resnap) {
+  el.textContent = busy || '';
+  try {
+    const j = await (await fetch(path)).json();
+    if (!j.ok) throw new Error(j.error);
+    applyInfo(j);
+    el.textContent = '完成';
+    if (resnap) { await refreshInfo(); snap(); }
+  } catch (e) { el.textContent = '錯誤: ' + e.message; el.className = 'err'; }
+}
+const refreshInfo = () => api('/api/info', $('cstatus'), '讀取中...');
+$('fset').onclick = () => api('/api/focus?set=' + $('fmm').value, $('fstatus'), '對焦中...', true);
+$('fauto').onclick = () => api('/api/focus?auto=1', $('fstatus'), '自動對焦中(可能十幾秒)...', true);
+$('sset').onclick = () => api('/api/shutter?set=' + $('sms').value, $('cstatus'), '設定中...', true);
+$('sauto').onclick = () => api('/api/shutter?auto=1', $('cstatus'), '自動曝光中...', true);
+$('gset').onclick = () => api('/api/gain?set=' + $('gv').value, $('cstatus'), '設定中...', true);
+$('jset').onclick = () => api('/api/job?set=' + $('jsel').value, $('cstatus'), '切換中...', true);
+refreshInfo();
 snap();
 </script>
 </body>

@@ -7,8 +7,8 @@ import zlib
 from pathlib import Path
 
 from visordemo import Camera, VisorError
-from visordemo.protocol import (gim_request, parse_gim_header,
-                                parse_trg_response, png_gray)
+from visordemo.protocol import (demosaic_half, gim_request, parse_gim_header,
+                                parse_trg_response, png_gray, png_rgb)
 from visordemo.simulator import Simulator
 
 
@@ -48,6 +48,17 @@ class TestProtocol(unittest.TestCase):
     def test_png_gray_size_check(self):
         with self.assertRaises(ValueError):
             png_gray(2, 3, b"\x00")
+
+    def test_demosaic_half(self):
+        # 2x2 Bayer BG quad: B=10 G=20 / G=30 R=40 -> one RGB pixel
+        r, c, rgb = demosaic_half(2, 2, bytes([10, 20, 30, 40]))
+        self.assertEqual((r, c), (1, 1))
+        self.assertEqual(rgb, bytes([40, 25, 10]))  # R, avg(G), B
+
+    def test_png_rgb(self):
+        png = png_rgb(1, 1, bytes([255, 0, 0]))
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertEqual(png[25], 2)  # IHDR color type = truecolor
 
 
 class TestEndToEnd(unittest.TestCase):
@@ -92,6 +103,43 @@ class TestEndToEnd(unittest.TestCase):
             self.assertTrue(out.read_bytes().startswith(b"\x89PNG"))
         finally:
             out.unlink(missing_ok=True)
+
+    def test_focus_roundtrip(self):
+        with Camera("127.0.0.1", self.sim.port, auto_trigger=False) as cam:
+            orig = cam.get_focus()
+            self.assertEqual(cam.set_focus(1830), 1830.0)
+            self.assertEqual(cam.get_focus(), 1830.0)
+            self.assertEqual(cam.autofocus(), 500.0)
+            cam.set_focus(orig)
+
+    def test_jobs_and_switch(self):
+        with Camera("127.0.0.1", self.sim.port, auto_trigger=False) as cam:
+            active, names = cam.jobs()
+            self.assertEqual(names, ["Job1", "Job2"])
+            cam.set_job(2)
+            self.assertEqual(cam.jobs()[0], 2)
+            cam.set_job("Job1")
+            self.assertEqual(cam.jobs()[0], 1)
+            with self.assertRaises(VisorError):
+                cam.set_job(99)
+
+    def test_shutter_gain(self):
+        with Camera("127.0.0.1", self.sim.port, auto_trigger=False) as cam:
+            cam.set_shutter(8.0)
+            self.assertEqual(cam.get_shutter(), 8.0)
+            cam.auto_shutter()
+            self.assertEqual(cam.get_shutter(), 20.0)
+            cam.set_gain(2.0)
+            self.assertEqual(cam.get_gain(), 2.0)
+
+    def test_info_and_fov(self):
+        with Camera("127.0.0.1", self.sim.port, auto_trigger=False) as cam:
+            self.assertIn("simulator", cam.identity())
+            p = cam.internal_params()
+            self.assertEqual(p["focal_mm"], 12.119)
+            w, h = cam.fov(1830)
+            self.assertAlmostEqual(w, 33.3, delta=1)   # 64px 模擬感光面
+            self.assertGreater(w / h, 1.2)
 
     def test_webcamdemo_compat_surface(self):
         """qc-station photo.py 的呼叫序列可以原樣走完。"""
