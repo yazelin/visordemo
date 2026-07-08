@@ -75,18 +75,20 @@ photo.capture("192.168.2.100", dst, camera_factory=VisorCamera)
 
 ## Web UI
 
-`visordemo serve` 後開 <http://127.0.0.1:8601> :連續預覽(可調輪詢間隔)、單張擷取、下載影像、對焦(含自動對焦與即時 FOV 顯示)、快門/增益/自動曝光、job 切換。每個請求都是開連線-做-關連線,斷線自癒。
+儀器面板風格介面:大取景框(取像時掃描線)+ 對焦/曝光/檢測程式控制列。`visordemo serve` 後開 <http://127.0.0.1:8601>,可做連續預覽(可調輪詢間隔)、單張擷取、下載影像、對焦(含自動對焦與即時 FOV 顯示)、快門/增益/自動曝光、job 切換。勾「**寫入 job(斷電保留)**」後,對焦/曝光/增益的變更會以 `permanent` 寫進感測器 job(重開機保留),否則只是暫存。
 
-HTTP API(全部回 JSON,錯誤回 `{"ok":false,"error":...}`):
+相機命令 port 一次只服務一個連線,故 web UI 有**單飛保護**:忙碌時(有人正在調參數/自動對焦)並發請求直接回 `409`,而非疊上去把相機打爆。每個請求都是開連線-做-關連線,斷線自癒。
+
+HTTP API(全部回 JSON,錯誤回 `{"ok":false,"error":...}`,忙碌回 `409`):
 
 | Path | 說明 |
 |---|---|
-| `GET /snapshot.png` | 觸發 + 取像,回 PNG |
+| `GET /snapshot.png[?which=0/1/2&trigger=0]` | 觸發 + 取像,回 PNG |
 | `GET /api/info` | 對焦/FOV/快門/增益/job 一次全讀 |
-| `GET /api/focus[?set=mm 或 auto=1]` | 讀/設/自動對焦 |
-| `GET /api/shutter[?set=ms 或 auto=1]` | 讀/設/自動曝光 |
-| `GET /api/gain[?set=x]` | 讀/設增益 |
-| `GET /api/job[?set=n或名稱]` | 讀/切換 job |
+| `GET /api/focus[?set=mm 或 auto=1][&perm=1]` | 讀/設/自動對焦 |
+| `GET /api/shutter[?set=ms 或 auto=1][&perm=1]` | 讀/設/自動曝光 |
+| `GET /api/gain[?set=x][&perm=1]` | 讀/設增益 |
+| `GET /api/job[?set=n或名稱][&perm=1]` | 讀/切換 job |
 
 ## 已知限制與坑
 
@@ -104,8 +106,10 @@ HTTP API(全部回 JSON,錯誤回 `{"ok":false,"error":...}`):
 ## 測試
 
 ```bash
-python3 -m unittest discover -s tests -v   # 零硬體:協定單元測試 + simulator 端對端
+python3 -m unittest discover -s tests -v   # 18 tests,零硬體:協定單元 + simulator 端對端 + web 單飛
 ```
+
+已用於 [qc-station](https://github.com/ching-tech/qc-station) 品檢站當拍照機(`photo_device` 設 `visor:<ip>`,取像走 TCP、ffmpeg 轉 JPEG)。
 
 ## 授權
 
